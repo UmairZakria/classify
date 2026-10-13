@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Lead Row Copier",
+  "version": "1.0.0",
+  "description": "Classify lead notes and copy a Google Sheets row from the comments text area.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "Show or hide the lead row copy button"
+  }
+}

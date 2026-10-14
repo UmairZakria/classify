@@ -2564,8 +2564,11 @@ const {
   isDirectional,
   normalizeDirectional,
   UNIT_WORDS,
+  makeHint,
+  modelHint,
+  categoryFor,
 } = __load("lib/lexicons.js");
-const { labelsOfField, labelFieldsOf, itemTokens } = __load("lib/structure.js");
+const { labelsOfField, labelFieldsOf, itemTokens, splitParts } = __load("lib/structure.js");
 
 const ALPHA_TOKEN = /^[A-Za-z][A-Za-z.'-]*$/;
 const STREET_TOKEN = /^(?:[A-Za-z][A-Za-z.'-]*|\d{1,3}(?:st|nd|rd|th))$/i;
@@ -2586,6 +2589,96 @@ function titlePhrase(phrase) {
 
 function borrowedLabel(items, index, field) {
   return items.some((i) => i.targetIndex === index && i.index < index && labelsOfField(i, field).length > 0);
+}
+
+function isUnitLikeLine(text) {
+  const value = String(text || "").replace(/,$/, "").trim();
+  if (!value) return false;
+  if (/^(?:apt|apartment|unit|ste|suite|lot|bldg|building|house)\b/i.test(value)) return true;
+  if (/^#\s*\d+[A-Za-z]?$/.test(value)) return true;
+  return false;
+}
+
+function isLikelyCityText(text) {
+  const value = String(text || "").replace(/,$/, "").trim();
+  if (!value) return false;
+  if (!/^[A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2}$/.test(value)) return false;
+  if (lookupState(value) || isStateToken(value)) return false;
+  return !/^(?:home|owner|renter|vehicle|vehicles|car|cars|truck|trucks|insurance|insurer|state|allstate|progressive|geico|farmers|liberty|national|general)$/.test(value.toLowerCase());
+}
+
+function isPhoneLikeLine(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (/\b(?:phone|ph|tel|cell|mobile|call)\b/i.test(value)) return true;
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 10 || digits.length === 11) return /^\d[\d\s().-]*\d$/.test(value);
+  return false;
+}
+
+function isVehicleLikeLine(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  if (/^(?:\d{4}\s+)?(?:[A-Za-z]+\s+){0,2}(?:car|cars|vehicle|vehicles|truck|trucks|pickup|suv|van|vans|jeep|sedan|wagon|coupe|hatchback|convertible|motorcycle)\b/i.test(value)) return true;
+  return /\b(?:car|cars|vehicle|vehicles|truck|trucks|pickup|suv|van|vans|jeep|sedan|wagon|coupe|hatchback|convertible|motorcycle)\b/i.test(value) && /\d{4}/.test(value);
+}
+
+function looksLikeAddressContinuation(items, index, nextItem) {
+  const nextText = String(nextItem.text || "").replace(/[,;]+$/, "").trim();
+  if (!nextText) return false;
+  if (isPhoneLikeLine(nextText)) return false;
+  if (isVehicleLikeLine(nextText)) return false;
+  if (isUnitLikeLine(nextText)) return true;
+  if (/(?:[A-Z]{2}|[A-Za-z]+)\s+\d{5,}\b/.test(nextText)) return true;
+
+  const nextNext = items[index + 2];
+  if (nextNext) {
+    const nextNextText = String(nextNext.text || "").trim();
+    if (isLikelyCityText(nextText) && (/^\d{5,}$/.test(nextNextText) || (!/^\d/.test(nextNextText) && /(?:[A-Z]{2}|[A-Za-z]+)\s+\d{5,}\b/.test(nextNextText)))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function expandAddressBlock(items, startIndex) {
+  const first = items[startIndex];
+  const firstText = String(first.text || "").trim();
+  if (!/^\d{1,6}[A-Za-z]?(?:\s+[A-Za-z][A-Za-z.'-]*)+/.test(firstText)) return first;
+  if (/\b(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december|year|years|yr|yrs|month|months|mos|day|days|auto|autos|vehicle|vehicles|vehical|vehicals|car|cars|truck|trucks|van|vans|suv|home|owner|renter|tenant|state|insurance|insurer|carrier|farm|allstate|progressive|geico|farmers|liberty|national|general)\b/i.test(firstText)) return first;
+  const firstWords = firstText.split(/\s+/).filter(Boolean);
+  const vehicleLikeStart = firstWords.some((word, index) => {
+    const previous = index > 0 ? firstWords[index - 1] : null;
+    return /^(?:19|20)\d{2}$/.test(word) && (makeHint(word) || modelHint(word) || categoryFor(word));
+  }) || (
+    firstWords.some((word) => /^(?:19|20)\d{2}$/.test(word)) &&
+    firstWords.some((word) => makeHint(word) || modelHint(word) || categoryFor(word))
+  );
+  if (vehicleLikeStart) return first;
+
+  const block = [first];
+  for (let cursor = startIndex; cursor + 1 < items.length; cursor += 1) {
+    const next = items[cursor + 1];
+    if (!looksLikeAddressContinuation(items, cursor, next)) break;
+    block.push(next);
+  }
+
+  if (block.length === 1) return first;
+
+  const firstItem = block[0];
+  const last = block[block.length - 1];
+  const combinedText = block.map((entry) => entry.text.trim()).join(" ");
+  return {
+    index: firstItem.index,
+    lineIndex: firstItem.lineIndex,
+    start: firstItem.start,
+    end: last.end,
+    text: combinedText,
+    labels: block.flatMap((entry) => entry.labels),
+    parts: splitParts(combinedText, firstItem.start),
+    targetIndex: firstItem.targetIndex,
+    blockLength: block.length,
+  };
 }
 
 function findHouseIndex(item, toks, atoms) {
@@ -2680,6 +2773,21 @@ function scanLocality(item, toks, atoms, street, cursor) {
     }
   }
 
+  if (!city) {
+    const anchorIndex = toks.findIndex((token, index) => {
+      if (index < cursor) return false;
+      const atom = atomAt(atoms, token.start, token.end);
+      return (atom && atom.kinds.includes("zip5")) || isStateToken(token.text) || lookupState(token.text);
+    });
+    if (anchorIndex > cursor) {
+      const inferredTokens = toks.slice(cursor, anchorIndex);
+      if (inferredTokens.length <= 3 && inferredTokens.every((token) => ALPHA_TOKEN.test(token.text))) {
+        cityTokens = inferredTokens;
+        city = inferredTokens.map((token) => token.text).join(" ");
+      }
+    }
+  }
+
   // A state name that is part of a longer name ("Missouri City") is not the
   // state; among the real candidates, the one closest to the ZIP wins.
   const standalone = states.filter((s) => {
@@ -2702,9 +2810,13 @@ function detectAddresses(ctx) {
   const { atoms, items, tokens } = ctx;
   const out = [];
 
-  for (const item of items) {
-    const fields = labelFieldsOf(item);
-    if (fields.has("dateOfBirth") && !fields.has("address")) continue;
+  for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+    const item = expandAddressBlock(items, itemIndex);
+    const fieldSet = labelFieldsOf(item);
+    if (fieldSet.has("dateOfBirth") && !fieldSet.has("address")) continue;
+
+    const blockLength = item.blockLength || 1;
+    if (blockLength > 1) itemIndex += blockLength - 1;
 
     const toks = itemTokens(item, tokens);
     const houseIndex = findHouseIndex(item, toks, atoms);
@@ -3133,9 +3245,19 @@ function isNearDate(date, entity, maxDistance = 240) {
 
 function hasCustomerContextNear(ctx, date) {
   const names = detectNames(ctx);
-  if (!names.some((name) => isNearDate(date, name))) return false;
   const addresses = detectAddresses(ctx);
-  return addresses.some((address) => isNearDate(date, address));
+
+  const hasNameNear = names.some((name) => isNearDate(date, name));
+  const hasAddressNear = addresses.some((address) => isNearDate(date, address));
+  const hasNameAddressOrder = names.some((name) =>
+    addresses.some((address) => {
+      const spanStart = Math.min(name.start, address.start);
+      const spanEnd = Math.max(name.end, address.end);
+      return date.start >= spanStart && date.end <= spanEnd && !(date.start > name.end && date.start > address.end) && !(date.end < name.start && date.end < address.start);
+    })
+  );
+
+  return (hasNameNear && hasAddressNear) || hasNameAddressOrder;
 }
 
 // A birth date is normally labelled ("Dob:", "born"). When it is not, it is

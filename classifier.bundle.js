@@ -16,7 +16,24 @@ const VEHICLE_SPELLING_FIXES = [
   [/\bforster\b/gi, "Forester"],
   [/\bforestr\b/gi, "Forester"],
   [/\bchevorlet\b/gi, "Chevrolet"],
+  [/\bcheverolet\b/gi, "Chevrolet"],
+  [/\bchevrollet\b/gi, "Chevrolet"],
+  [/\bchevvy\b/gi, "Chevrolet"],
+  [/\btoyta\b/gi, "Toyota"],
   [/\btoyata\b/gi, "Toyota"],
+  [/\bcamery\b/gi, "Camry"],
+  [/\bhondaa\b/gi, "Honda"],
+  [/\bescap\b/gi, "Escape"],
+  [/\bnisan\b/gi, "Nissan"],
+  [/\bcorola\b/gi, "Corolla"],
+  [/\bfussion\b/gi, "Fusion"],
+  [/\bhyundia\b/gi, "Hyundai"],
+  [/\btuscon\b/gi, "Tucson"],
+  [/\bcivik\b/gi, "Civic"],
+  [/\bmazdaa\b/gi, "Mazda"],
+  [/\bedg\b/gi, "Edge"],
+  [/\bcheroke\b/gi, "Cherokee"],
+  [/\brav\s+4\b/gi, "RAV4"],
   [/\bcaddilac\b/gi, "Cadillac"],
   [/\blincon\b/gi, "Lincoln"],
   [/\brouge\b/gi, "Rogue"],
@@ -844,11 +861,29 @@ function findDates(text) {
     push(m[0], m.index, m.index + m[0].length, year, month, clampDay(day, month, year), true);
   }
 
+  const yearFirstNumeric = /\b(\d{4})([/.])(\d{1,2})\2(\d{1,2})\b/g;
+  while ((m = yearFirstNumeric.exec(text)) !== null) {
+    const year = Number(m[1]);
+    const month = Number(m[3]);
+    const day = Number(m[4]);
+    push(m[0], m.index, m.index + m[0].length, year, month, clampDay(day, month, year), true);
+  }
+
   const numeric = /\b(\d{1,2})[/](\d{1,2})[/](\d{2,4})\b/g;
   while ((m = numeric.exec(text)) !== null) {
     const first = Number(m[1]);
     const second = Number(m[2]);
     const year = normalizeYear(m[3]);
+    const month = first > 12 && second <= 12 ? second : first;
+    const day = first > 12 && second <= 12 ? first : second;
+    push(m[0], m.index, m.index + m[0].length, year, month, clampDay(day, month, year), true);
+  }
+
+  const dottedNumeric = /\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b/g;
+  while ((m = dottedNumeric.exec(text)) !== null) {
+    const first = Number(m[1]);
+    const second = Number(m[2]);
+    const year = Number(m[3]);
     const month = first > 12 && second <= 12 ? second : first;
     const day = first > 12 && second <= 12 ? first : second;
     push(m[0], m.index, m.index + m[0].length, year, month, clampDay(day, month, year), true);
@@ -2153,12 +2188,18 @@ module.exports = {
 "use strict";
 
 const INSURANCE_COMPANIES = [
-  { canonical: "State Farm", aliases: ["state farm", "statefarm", "state farm insurance", "statefarm insurance"] },
+  {
+    canonical: "State Farm",
+    aliases: ["state farm", "statefarm", "state farm insurance", "statefarm insurance", "state fram"],
+  },
   { canonical: "Farmers", aliases: ["farmers", "farmers insurance", "farmers ins"] },
-  { canonical: "Allstate", aliases: ["allstate", "all state", "allstate insurance"] },
-  { canonical: "Progressive", aliases: ["progressive", "progressive insurance"] },
-  { canonical: "GEICO", aliases: ["geico", "g e i c o", "geico insurance"] },
-  { canonical: "Liberty Mutual", aliases: ["liberty mutual", "libertymutual", "liberty mutual insurance"] },
+  { canonical: "Allstate", aliases: ["allstate", "all state", "allstate insurance", "allstatee"] },
+  { canonical: "Progressive", aliases: ["progressive", "progressive insurance", "progresiv"] },
+  { canonical: "GEICO", aliases: ["geico", "g e i c o", "geico insurance", "geicoo"] },
+  {
+    canonical: "Liberty Mutual",
+    aliases: ["liberty mutual", "libertymutual", "liberty mutual insurance", "liberty mutal", "libery mutual"],
+  },
   { canonical: "Ohio Mutual", aliases: ["ohio mutual", "ohio mutual insurance"] },
   { canonical: "Nationwide", aliases: ["nationwide", "nationwide insurance"] },
   { canonical: "USAA", aliases: ["usaa", "u s a a"] },
@@ -2211,7 +2252,10 @@ const INSURANCE_COMPANIES = [
   { canonical: "Mercury General", aliases: ["mercurygeneral"] },
   { canonical: "MGA", aliases: ["mga"] },
   { canonical: "Mid-Century", aliases: ["midcentury"] },
-  { canonical: "National General", aliases: ["nationalgeneral", "nationl general"] },
+  {
+    canonical: "National General",
+    aliases: ["nationalgeneral", "nationl general", "national genral", "nation general"],
+  },
   { canonical: "Oak Brook County Mutual", aliases: ["oakbrookcountymutual"] },
   { canonical: "Old American County Mutual", aliases: ["oldamericancountymutual"] },
   { canonical: "Permanent General", aliases: ["permanentgeneral"] },
@@ -2607,6 +2651,17 @@ function isLikelyCityText(text) {
   return !/^(?:home|owner|renter|vehicle|vehicles|car|cars|truck|trucks|insurance|insurer|state|allstate|progressive|geico|farmers|liberty|national|general)$/.test(value.toLowerCase());
 }
 
+function isCityStatePhrase(text) {
+  const value = String(text || "").replace(/[,;]+$/, "").trim();
+  if (!value) return false;
+  const tokens = value.split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return false;
+  const last = tokens[tokens.length - 1];
+  if (!(lookupState(last) || isStateToken(last))) return false;
+  const city = tokens.slice(0, -1).join(" ");
+  return isLikelyCityText(city);
+}
+
 function isPhoneLikeLine(text) {
   const value = String(text || "").trim();
   if (!value) return false;
@@ -2624,11 +2679,13 @@ function isVehicleLikeLine(text) {
 }
 
 function looksLikeAddressContinuation(items, index, nextItem) {
+  const currentText = String(items[index]?.text || "").replace(/[,;]+$/, "").trim();
   const nextText = String(nextItem.text || "").replace(/[,;]+$/, "").trim();
   if (!nextText) return false;
   if (isPhoneLikeLine(nextText)) return false;
   if (isVehicleLikeLine(nextText)) return false;
   if (isUnitLikeLine(nextText)) return true;
+  if (isCityStatePhrase(currentText) && /^\d{5}(?:-\d{4})?$/.test(nextText.replace(/\D/g, ""))) return true;
   if (/(?:[A-Z]{2}|[A-Za-z]+)\s+\d{5,}\b/.test(nextText)) return true;
 
   const nextNext = items[index + 2];
@@ -2644,7 +2701,7 @@ function looksLikeAddressContinuation(items, index, nextItem) {
 function expandAddressBlock(items, startIndex) {
   const first = items[startIndex];
   const firstText = String(first.text || "").trim();
-  if (!/^\d{1,6}[A-Za-z]?(?:\s+[A-Za-z][A-Za-z.'-]*)+/.test(firstText)) return first;
+  if (!/\d{1,6}[A-Za-z]?(?:\s+[A-Za-z][A-Za-z.'-]*)+/.test(firstText)) return first;
   if (/\b(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december|year|years|yr|yrs|month|months|mos|day|days|auto|autos|vehicle|vehicles|vehical|vehicals|car|cars|truck|trucks|van|vans|suv|home|owner|renter|tenant|state|insurance|insurer|carrier|farm|allstate|progressive|geico|farmers|liberty|national|general)\b/i.test(firstText)) return first;
   const firstWords = firstText.split(/\s+/).filter(Boolean);
   const vehicleLikeStart = firstWords.some((word, index) => {
@@ -3634,6 +3691,19 @@ function detectVehicles(ctx) {
       }
       if (!vehicleParts.length) vehicleParts.push(itemPart);
 
+      for (const label of labelsOfField(item, "homeOwner")) {
+        if (label.start < itemPart.start || label.end > itemPart.end) continue;
+        if (itemPart.text.slice(0, label.start - itemPart.start).trim()) continue;
+        const suffix = itemPart.text.slice(label.end - itemPart.start);
+        const year = /\b(?:19|20)\d{2}\b/.exec(suffix);
+        if (!year || !/^[\s,:;/-]*$/.test(suffix.slice(0, year.index))) continue;
+        const start = label.end + year.index;
+        const part = { text: ctx.text.slice(start, itemPart.end).trim(), start, end: itemPart.end };
+        if (part.text && !vehicleParts.some((existing) => existing.start === part.start && existing.end === part.end)) {
+          vehicleParts.push(part);
+        }
+      }
+
       for (const part of vehicleParts) {
         const analysis = analysePart(item, part, ctx);
         if (!analysis) continue;
@@ -3772,6 +3842,16 @@ function negationBefore(text, offset) {
   return { start: floor + m.index, end: floor + m.index + m[0].length };
 }
 
+function isCityStateZip(ctx, part, city, cityToken) {
+  if (!knownCity(city)) return false;
+  const following = tokensIn(ctx.tokens, cityToken.end, part.end);
+  return following.some(
+    (token, index) =>
+      (isStateToken(token.text) || lookupState(token.text)) &&
+      following.slice(index + 1, index + 3).some((next) => /^\d{5}$/.test(next.text))
+  );
+}
+
 function detectInsuranceCompanies(ctx) {
   const out = [];
   const seen = new Set();
@@ -3788,6 +3868,7 @@ function detectInsuranceCompanies(ctx) {
           const phrase = run.map((t) => t.text).join(" ");
           const entry = insuranceExact(phrase);
           if (!entry) continue;
+          if (isCityStateZip(ctx, part, phrase, run[run.length - 1])) continue;
           const key = `${entry.canonical}:${run[0].start}`;
           if (seen.has(key)) continue;
           seen.add(key);

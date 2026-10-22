@@ -1,6 +1,6 @@
 "use strict";
 
-const DEFAULT_TITLE = "Show or hide the lead row copy button";
+const DEFAULT_TITLE = "Made By Umair Zakria";
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (tab.id == null) return;

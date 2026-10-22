@@ -11,7 +11,13 @@
   "background": {
     "service_worker": "service-worker.js"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["fonts/Poppins-Light.ttf"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "action": {
-    "default_title": "Show or hide the lead row copy button"
+    "default_title": "Made By Umair Zakria"
   }
 }

@@ -1,0 +1,17 @@
+{
+  "name": "lead-row-copier",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Chrome extension: extract lead details from free-form notes and copy a Google Sheets row.",
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "compromise": "^14.14.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

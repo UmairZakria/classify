@@ -2,6 +2,7 @@
 
 (() => {
   const INSTANCE_KEY = "__leadRowCopier";
+  const BUTTON_TITLE = "Made By Umair Zakria";
   if (window[INSTANCE_KEY]) {
     window[INSTANCE_KEY].toggle();
     return;
@@ -20,27 +21,36 @@
   const host = document.createElement("div");
   host.setAttribute("aria-label", "Lead row copy button");
   host.style.cssText = "position:fixed;z-index:2147483647;pointer-events:auto;";
+  const fontUrl = chrome.runtime.getURL("fonts/Poppins-Light.ttf");
   const shadow = host.attachShadow({ mode: "closed" });
   shadow.innerHTML = `
     <style>
+      @font-face {
+        font-family: Poppins;
+        src: url("${fontUrl}") format("truetype");
+        font-style: normal;
+        font-weight: 300;
+        font-display: swap;
+      }
       button {
-        border: 0;
+        border: 1px solid #d0d5dd;
         border-radius: 999px;
         padding: 9px 15px;
-        background: #155eef;
-        color: #fff;
+        background: #fff;
+        color: #344054;
         box-shadow: 0 2px 8px rgb(16 24 40 / 24%);
         cursor: pointer;
-        font: 600 13px/1.2 system-ui, sans-serif;
+        font: 300 13px/1.2 Poppins, sans-serif;
         white-space: nowrap;
       }
-      button:hover { background: #004eeb; }
-      button:focus-visible { outline: 3px solid #84caff; outline-offset: 2px; }
+      button:hover { background: #f9fafb; }
+      button:focus-visible { outline: 3px solid #98a2b3; outline-offset: 2px; }
       button:disabled { cursor: wait; opacity: .8; }
     </style>
     <button type="button">Copy</button>
   `;
   const button = shadow.querySelector("button");
+  button.title = BUTTON_TITLE;
   document.documentElement.appendChild(host);
 
   let visible = true;
@@ -66,7 +76,7 @@
     if (resetAfter) {
       resetTimer = window.setTimeout(() => {
         button.textContent = "Copy";
-        button.title = "Classify the comments text and copy one Google Sheets row.";
+        button.title = BUTTON_TITLE;
       }, resetAfter);
     }
   }

@@ -24108,8 +24108,16 @@ vlly vly vlys vst vsta vw vws walk walks wall way ways well wells wl wls wy xing
     let spouseName = null;
     let spouseDob = null;
     for (const label of ctx.labels.filter((l) => l.field === "name")) {
+      let targetLine = label.line;
+      let targetStart = label.valueStart;
+      let targetEnd = label.valueEnd;
+      if (label.dangling && targetLine + 1 < ctx.lines.length) {
+        targetLine += 1;
+        targetStart = ctx.lines[targetLine].start;
+        targetEnd = ctx.lines[targetLine].end;
+      }
       const lineToks = ctx.tokens.filter(
-        (t2) => t2.line === label.line && t2.start >= label.valueStart && t2.end <= label.valueEnd && t2.word
+        (t2) => t2.line === targetLine && t2.start >= targetStart && t2.end <= targetEnd && t2.word
       );
       if (lineToks.length) {
         const candidateTokens = [];
@@ -24199,34 +24207,67 @@ vlly vly vlys vst vsta vw vws walk walks wall way ways well wells wl wls wy xing
       }
     }
     if (!primaryName && ctx.lines.length) {
-      const candidateLines = [];
+      const candidates = [];
       for (let li = 0; li < ctx.lines.length; li += 1) {
         const line = ctx.lines[li];
-        const allLineToks = ctx.tokens.filter((t2) => t2.line === line.index);
-        if (allLineToks.some((t2) => hitsAny(t2, blocked))) continue;
-        if (ctx.labels.some((l) => l.line === line.index && l.field !== "name")) continue;
-        const wordToks = allLineToks.filter((t2) => t2.word);
-        if (wordToks.length >= 2 && wordToks.length <= 4) {
-          const firstOk = isValidNameWord(wordToks[0].text, false);
-          const lastOk = isValidNameWord(wordToks[wordToks.length - 1].text, false);
-          const midOk = wordToks.slice(1, -1).every((t2) => isValidNameWord(t2.text, true));
-          const allCapitalized = wordToks.every((t2) => /^[A-Z]/.test(t2.text));
-          if (firstOk && lastOk && midOk && allCapitalized) {
-            const raw = cleanCandidateName(ctx.text.slice(wordToks[0].start, wordToks[wordToks.length - 1].end));
-            if (raw.length >= 3 && raw.includes(" ")) {
-              candidateLines.push({
-                name: titleCase(raw),
-                start: wordToks[0].start,
-                end: wordToks[wordToks.length - 1].end,
-                lineIndex: li
-              });
+        if (ctx.labels.some((l) => l.line === line.index && l.field !== "name" && !l.dangling && l.start === line.start)) {
+          continue;
+        }
+        const lineToks = ctx.tokens.filter((t2) => t2.line === line.index && t2.word);
+        if (!lineToks.length) continue;
+        let currentRun = [];
+        const runs = [];
+        for (const t2 of lineToks) {
+          if (!hitsAny(t2, blocked)) {
+            currentRun.push(t2);
+          } else {
+            if (currentRun.length) {
+              runs.push(currentRun);
+              currentRun = [];
+            }
+          }
+        }
+        if (currentRun.length) runs.push(currentRun);
+        for (const run of runs) {
+          for (let start2 = 0; start2 < run.length; start2 += 1) {
+            for (let len = Math.min(4, run.length - start2); len >= 2; len -= 1) {
+              const sub = run.slice(start2, start2 + len);
+              const firstOk = isValidNameWord(sub[0].text, false);
+              const lastOk = isValidNameWord(sub[sub.length - 1].text, false);
+              const midOk = sub.slice(1, -1).every((t2) => isValidNameWord(t2.text, true));
+              const allCap = sub.every((t2) => /^[A-Z]/.test(t2.text));
+              if (firstOk && lastOk && midOk && allCap) {
+                const raw = cleanCandidateName(ctx.text.slice(sub[0].start, sub[sub.length - 1].end));
+                if (raw.length >= 3 && raw.includes(" ")) {
+                  let score2 = 0;
+                  const nextLine = ctx.lines[li + 1];
+                  const prevLine = ctx.lines[li - 1];
+                  if (nextLine && ctx.tokens.some((t2) => t2.line === nextLine.index && hitsAny(t2, blocked))) {
+                    score2 += 10;
+                  }
+                  if (prevLine && ctx.tokens.some((t2) => t2.line === prevLine.index && hitsAny(t2, blocked))) {
+                    score2 += 6;
+                  }
+                  if (run.length === len) score2 += 5;
+                  if (len === 3) score2 += 2;
+                  candidates.push({
+                    name: titleCase(raw),
+                    start: sub[0].start,
+                    end: sub[sub.length - 1].end,
+                    lineIndex: li,
+                    score: score2
+                  });
+                  break;
+                }
+              }
             }
           }
         }
       }
-      if (candidateLines.length) {
-        primaryName = candidateLines[0].name;
-        primarySpan = { start: candidateLines[0].start, end: candidateLines[0].end };
+      if (candidates.length) {
+        candidates.sort((a, b2) => b2.score - a.score || a.lineIndex - b2.lineIndex);
+        primaryName = candidates[0].name;
+        primarySpan = { start: candidates[0].start, end: candidates[0].end };
       }
     }
     return {
